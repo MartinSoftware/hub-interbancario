@@ -7,6 +7,7 @@ $TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJCQU5LX0EiLCJzY29wZXMiO
 $BANK_ID = "BANK_A"
 $BANK_SECRET = "bank_a_secret"
 $HUB_URL = "http://localhost:8000/api/v1/transfers"
+$idempotencyKey = "550e8400-e29b-41d4-a716-446655440000" 
 
 # ---------- BODY ----------
 $bodyObj = [ordered]@{
@@ -15,7 +16,8 @@ $bodyObj = [ordered]@{
     amount              = "1500.00"
     currency            = "PEN"
     concept             = "Pago factura #00123"
-    client_transfer_id  = "BNK-A-2026-000042"
+    #client_transfer_id  = "BNK-A-2026-000043"
+    client_transfer_id  = "BNK-A-TEST-IDEMPOTENCIA"
     priority            = "NORMAL"
     metadata            = [ordered]@{
         invoice_id   = "INV-00123"
