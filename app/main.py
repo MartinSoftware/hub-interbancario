@@ -1,3 +1,4 @@
+from app.api.v1.router import api_router
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -36,6 +37,7 @@ app = FastAPI(
     redoc_url=None,
     openapi_url="/openapi.json" if settings.is_dev else None,
 )
+app.include_router(api_router)
 
 # ─────────────────────────────────────────────────────────────
 # Handler global para excepciones del Hub
