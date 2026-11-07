@@ -1,11 +1,12 @@
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.logging import configure_logging, get_logger
+from app.core.exceptions import HubError
 
 configure_logging()
 logger = get_logger(__name__)
@@ -36,6 +37,27 @@ app = FastAPI(
     openapi_url="/openapi.json" if settings.is_dev else None,
 )
 
+# ─────────────────────────────────────────────────────────────
+# Handler global para excepciones del Hub
+# ─────────────────────────────────────────────────────────────
+@app.exception_handler(HubError)
+async def hub_error_handler(request: Request, exc: HubError) -> JSONResponse:
+    logger.warning(
+        "HubError %s en %s %s: %s",
+        exc.error_code,
+        request.method,
+        request.url.path,
+        exc.message,
+    )
+    return JSONResponse(
+        status_code=exc.http_status,
+        content={
+            "error_code": exc.error_code,
+            "message": exc.message,
+            "details": exc.details or None,
+            "request_id": request.headers.get("X-Request-Id"),
+        },
+    )
 
 @app.get("/health", tags=["ops"])
 async def health() -> JSONResponse:
