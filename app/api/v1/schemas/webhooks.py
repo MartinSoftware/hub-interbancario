@@ -37,3 +37,5 @@ class WebhookStatusUpdate(BaseModel):
     previous_status: TransferStatus
     new_status: TransferStatus
     reason: str | None = None
+    
+    # Ya existe WebhookStatusUpdate, lo reutilizamos para el payload saliente

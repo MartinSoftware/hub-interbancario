@@ -69,7 +69,7 @@ class TransferRepository:
                 "Ya existe una transferencia con ese client_transfer_id"
             ) from e
         return transfer
-
+    
     async def get_by_id(self, transfer_id: uuid.UUID) -> Transfer | None:
         result = await self.session.execute(
             select(Transfer).where(Transfer.id == transfer_id)
@@ -97,7 +97,43 @@ class TransferRepository:
             transfer.completed_at = datetime.now(timezone.utc)
         await self.session.flush()
         return transfer
+    
+    async def list_for_bank(
+        self,
+        *,
+        bank_code: str,
+        status: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[Transfer], int]:
+        """Lista transferencias donde el banco es origen o destino."""
+        from sqlalchemy import func, or_
 
+        base_filter = or_(
+            Transfer.origin_bank_id == bank_code,
+            Transfer.destination_bank_id == bank_code,
+        )
+        if status:
+            base_filter = base_filter & (Transfer.status == status)
+
+        # Total
+        count_stmt = select(func.count()).select_from(Transfer).where(base_filter)
+        total = (await self.session.execute(count_stmt)).scalar_one()
+
+        # Items paginados
+        offset = (page - 1) * page_size
+        stmt = (
+            select(Transfer)
+            .where(base_filter)
+            .order_by(Transfer.created_at.desc())
+            .offset(offset)
+            .limit(page_size)
+        )
+        result = await self.session.execute(stmt)
+        items = list(result.scalars().all())
+
+        return items, total
+    
 
 # ─────────────────────────────────────────────────────────────
 # TRANSFER_EVENTS (auditoría)
@@ -125,6 +161,7 @@ class TransferEventRepository:
         self.session.add(event)
         await self.session.flush()
         return event
+    
 
 
 # ─────────────────────────────────────────────────────────────

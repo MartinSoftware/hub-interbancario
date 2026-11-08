@@ -72,3 +72,9 @@ class TransferDetailResponse(BaseModel):
     completed_at: datetime | None = None
     failure_reason: str | None = None
     metadata: dict[str, Any] | None = Field(default=None, alias="metadata_")
+
+class TransferListResponse(BaseModel):
+    items: list[TransferDetailResponse]
+    total: int
+    page: int
+    page_size: int

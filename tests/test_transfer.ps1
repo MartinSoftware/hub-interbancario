@@ -3,11 +3,12 @@
 # ============================================================
 
 # ---------- CONFIGURACIÓN ----------
-$TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJCQU5LX0EiLCJzY29wZXMiOlsidHJhbnNmZXJzOndyaXRlIiwidHJhbnNmZXJzOnJlYWQiXSwiaWF0IjoxNzk0MDMzMDY0LCJleHAiOjE3OTQwMzY2NjR9.PSLyj2-z4QoD39yG5SO4geXJjfWFsh5XNZGQfAZKjvs"    # ← Reemplaza con el access_token que obtuviste
+$TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJCQU5LX0EiLCJzY29wZXMiOlsidHJhbnNmZXJzOndyaXRlIiwidHJhbnNmZXJzOnJlYWQiXSwiaWF0IjoxNzk0MDk2MTUxLCJleHAiOjE3OTQwOTk3NTF9.L9nBIZQURTCGxUkJVwWFHbcfiTQ37hY7ntRX27usxCY"    # ← Reemplaza con el access_token que obtuviste
 $BANK_ID = "BANK_A"
 $BANK_SECRET = "bank_a_secret"
 $HUB_URL = "http://localhost:8000/api/v1/transfers"
-$idempotencyKey = "550e8400-e29b-41d4-a716-446655440000" 
+#$idempotencyKey = "550e8400-e29b-41d4-a716-446655440000" 
+$idempotencyKey = [guid]::NewGuid().ToString()
 
 # ---------- BODY ----------
 $bodyObj = [ordered]@{
@@ -17,7 +18,8 @@ $bodyObj = [ordered]@{
     currency            = "PEN"
     concept             = "Pago factura #00123"
     #client_transfer_id  = "BNK-A-2026-000043"
-    client_transfer_id  = "BNK-A-TEST-IDEMPOTENCIA"
+    #client_transfer_id  = "BNK-A-TEST-IDEMPOTENCIA"
+    client_transfer_id  = "BNK-A-$(Get-Date -Format 'yyyyMMddHHmmss')"
     priority            = "NORMAL"
     metadata            = [ordered]@{
         invoice_id   = "INV-00123"

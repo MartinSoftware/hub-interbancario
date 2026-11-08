@@ -133,6 +133,9 @@ async def process_send_webhook_job(job: JobQueue) -> None:
             )
 
         decision = (response_body or {}).get("decision")
+        final_status: str | None = None
+        final_reason: str | None = None
+
         if decision == "ACCEPTED":
             transfer.status = "COMPLETED"
             transfer.completed_at = datetime.now(timezone.utc)
@@ -145,6 +148,7 @@ async def process_send_webhook_job(job: JobQueue) -> None:
                 )
             )
             logger.info("Transfer %s COMPLETED", transfer.id)
+            final_status = "COMPLETED"
         elif decision == "REJECTED":
             reason = (response_body or {}).get("reason", "Rechazada por destino")
             transfer.status = "REJECTED"
@@ -159,10 +163,18 @@ async def process_send_webhook_job(job: JobQueue) -> None:
                 )
             )
             logger.info("Transfer %s REJECTED: %s", transfer.id, reason)
+            final_status = "REJECTED"
+            final_reason = reason
         else:
             logger.warning("Respuesta sin decision clara: %s", response_body)
 
         await session.commit()
+
+        # Notificar al banco origen (fuera de la transacción)
+        if final_status is not None:
+            await notify_origin_bank(
+                transfer, "PROCESSING", final_status, final_reason
+            )
 
 
 async def mark_job_completed(job_id: uuid.UUID) -> None:
@@ -180,7 +192,7 @@ async def mark_job_completed(job_id: uuid.UUID) -> None:
 
 
 async def mark_job_failed(job_id: uuid.UUID, error: str) -> None:
-    """Incrementa intentos y reprograma con backoff, o marca FAILED."""
+    """Incrementa intentos y reprograma con backoff, o marca FAILED si agotó."""
     async with AsyncSessionLocal() as session:
         job = await session.get(JobQueue, job_id)
         if job is None:
@@ -194,6 +206,37 @@ async def mark_job_failed(job_id: uuid.UUID, error: str) -> None:
                 "Job %s FAILED tras %d intentos: %s",
                 job.id, job.attempts, error,
             )
+
+            # Propagar FAILED a la transferencia asociada
+            transfer_id_raw = job.payload.get("transfer_id")
+            if transfer_id_raw:
+                transfer = await session.get(
+                    Transfer, uuid.UUID(transfer_id_raw)
+                )
+                if transfer is not None and transfer.status == "PROCESSING":
+                    transfer.status = "FAILED"
+                    transfer.failure_reason = f"Webhook falló: {error[:200]}"
+                    session.add(
+                        TransferEvent(
+                            transfer_id=transfer.id,
+                            from_status="PROCESSING",
+                            to_status="FAILED",
+                            actor="worker",
+                            reason=error[:255],
+                        )
+                    )
+                    logger.warning(
+                        "Transfer %s marcada como FAILED tras agotar reintentos",
+                        transfer.id,
+                    )
+                    # Guardar para notificar después del commit
+                    transfer_to_notify = transfer
+                    await session.commit()
+                    # Notificar al origen (fuera de la transacción)
+                    await notify_origin_bank(
+                        transfer_to_notify, "PROCESSING", "FAILED", error[:200]
+                    )
+                    return
         else:
             backoff = settings.retry_backoff_list[
                 min(job.attempts - 1, len(settings.retry_backoff_list) - 1)
@@ -208,6 +251,74 @@ async def mark_job_failed(job_id: uuid.UUID, error: str) -> None:
             )
         await session.commit()
 
+async def notify_origin_bank(
+    transfer: Transfer, previous_status: str, new_status: str, reason: str | None
+) -> None:
+    """
+    Envía un webhook al banco origen notificando el cambio de estado.
+    Si falla, se registra en webhook_logs pero no se relanza la excepción
+    (la transferencia ya está en estado final; no queremos revertirla).
+    """
+    async with AsyncSessionLocal() as session:
+        origin_result = await session.execute(
+            select(Bank).where(Bank.code == transfer.origin_bank_id)
+        )
+        origin_bank = origin_result.scalar_one_or_none()
+        if origin_bank is None:
+            logger.warning(
+                "Banco origen %s no encontrado, no se notifica",
+                transfer.origin_bank_id,
+            )
+            return
+
+        event_id = str(uuid.uuid4())
+        payload = {
+            "event_id": event_id,
+            "event_type": "transfer.status_changed",
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+            "transfer_id": str(transfer.id),
+            "previous_status": previous_status,
+            "new_status": new_status,
+            "reason": reason,
+        }
+
+        success, http_status, response_body, error = await send_signed_webhook(
+            url=origin_bank.callback_url,
+            payload=payload,
+            signature_secret=origin_bank.signature_secret,
+            event_id=event_id,
+        )
+
+        session.add(
+            WebhookLog(
+                transfer_id=transfer.id,
+                direction="OUTBOUND",
+                target_bank_id=origin_bank.code,
+                target_url=origin_bank.callback_url,
+                event_type="transfer.status_changed",
+                payload=payload,
+                http_status=http_status,
+                response_body=response_body,
+                attempt=1,
+                success=success,
+                error_message=error,
+            )
+        )
+        await session.commit()
+
+        if success:
+            logger.info(
+                "Notificado al origen %s: %s → %s",
+                origin_bank.code,
+                previous_status,
+                new_status,
+            )
+        else:
+            logger.warning(
+                "No se pudo notificar al origen %s: %s",
+                origin_bank.code,
+                error,
+            )
 
 async def run_worker() -> None:
     logger.info(

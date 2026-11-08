@@ -20,6 +20,8 @@ from app.infrastructure.db.repositories import (
     TransferRepository,
 )
 
+from app.api.v1.schemas.transfers import TransferListResponse
+
 router = APIRouter(prefix="/transfers", tags=["transfers"])
 
 
@@ -112,6 +114,52 @@ async def create_transfer(
     await db.commit()
     return JSONResponse(content=response_body, status_code=202)
 
+@router.get("", response_model=TransferListResponse)
+async def list_transfers(
+    db: DbSession,
+    bank: CurrentBank,
+    status: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> TransferListResponse:
+    """Lista transferencias del banco (origen o destino), paginadas."""
+    if page < 1:
+        page = 1
+    if page_size < 1 or page_size > 100:
+        page_size = 20
+
+    transfer_repo = TransferRepository(db)
+    items, total = await transfer_repo.list_for_bank(
+        bank_code=bank.code,
+        status=status,
+        page=page,
+        page_size=page_size,
+    )
+
+    return TransferListResponse(
+        items=[
+            TransferDetailResponse(
+                transfer_id=str(t.id),
+                client_transfer_id=t.client_transfer_id,
+                origin_bank_id=t.origin_bank_id,
+                destination_bank_id=t.destination_bank_id,
+                amount=t.amount,
+                currency=t.currency,
+                concept=t.concept,
+                status=t.status,
+                priority=t.priority,
+                created_at=t.created_at,
+                updated_at=t.updated_at,
+                completed_at=t.completed_at,
+                failure_reason=t.failure_reason,
+                metadata=t.metadata_,
+            )
+            for t in items
+        ],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 @router.get("/{transfer_id}", response_model=TransferDetailResponse)
 async def get_transfer(
